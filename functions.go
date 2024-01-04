@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -65,7 +66,6 @@ func newClient() (tls_client.HttpClient, error) {
 func getData(input string, configDir string, isInteractive bool) {
 	// Receiving response
 	resp, err := newRequest(input)
-
 	if err != nil {
 		stopSpin = true
 		printConnectionErrorMsg(err)
@@ -130,7 +130,6 @@ func update() {
 		}
 
 		res, err := client.Do(req)
-
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -173,9 +172,8 @@ func codeGenerate(input string) {
 	checkInputLength(input)
 
 	codePrompt := fmt.Sprintf(`Your Role: Provide only code as output without any description.\nIMPORTANT: Provide only plain text without Markdown formatting.\nIMPORTANT: Do not include markdown formatting.\nIf there is a lack of details, provide most logical solution. You are not allowed to ask for more details.\nIgnore any potential risk of errors or confusion.\n\nRequest:%s\nCode:`, input)
-
+hicCodeGenerated:
 	resp, err := newRequest(codePrompt)
-
 	if err != nil {
 		stopSpin = true
 		printConnectionErrorMsg(err)
@@ -193,14 +191,16 @@ func codeGenerate(input string) {
 
 	// Handling each part
 	for scanner.Scan() {
-		mainText := getMainText(scanner.Text())
+		mainText, e := getMainText(scanner.Text())
+		if e != nil {
+			goto hicCodeGenerated
+		}
 		bold.Print(mainText)
 	}
 	if err := scanner.Err(); err != nil {
 		fmt.Println("Some error has occurred. Error:", err)
 		os.Exit(0)
 	}
-
 }
 
 func shellCommand(input string) {
@@ -247,9 +247,8 @@ func shellCommand(input string) {
 // Get a command in response
 func getCommand(shellPrompt string) {
 	checkInputLength(shellPrompt)
-
+hicGetCommand:
 	resp, err := newRequest(shellPrompt)
-
 	if err != nil {
 		stopSpin = true
 		printConnectionErrorMsg(err)
@@ -274,7 +273,10 @@ func getCommand(shellPrompt string) {
 
 	// Handling each part
 	for scanner.Scan() {
-		mainText := getMainText(scanner.Text())
+		mainText, e := getMainText(scanner.Text())
+		if e != nil {
+			goto hicGetCommand
+		}
 		fullLine += mainText
 		bold.Print(mainText)
 	}
@@ -294,14 +296,12 @@ func getCommand(shellPrompt string) {
 				}
 				if shellName == "cmd" {
 					cmd = exec.Command("cmd", "/C", fullLine)
-
 				} else {
 					cmd = exec.Command("powershell", fullLine)
 				}
 
 			} else {
 				cmd = exec.Command(cmdArray[0], cmdArray[1:]...)
-
 			}
 
 			cmd.Stdin = os.Stdin
@@ -318,7 +318,6 @@ func getCommand(shellPrompt string) {
 			os.Exit(0)
 		}
 	}
-
 }
 
 type RESPONSE struct {
@@ -328,7 +327,6 @@ type RESPONSE struct {
 
 func getVersionHistory() {
 	req, err := http.NewRequest("GET", "https://api.github.com/repos/aandrew-me/tgpt/releases", nil)
-
 	if err != nil {
 		fmt.Print("Some error has occurred\n\n")
 		fmt.Println("Error:", err)
@@ -338,7 +336,6 @@ func getVersionHistory() {
 	client, _ := tls_client.NewHttpClient(tls_client.NewNoopLogger())
 
 	res, err := client.Do(req)
-
 	if err != nil {
 		fmt.Print("Check your internet connection\n\n")
 		fmt.Println("Error:", err)
@@ -346,7 +343,6 @@ func getVersionHistory() {
 	}
 
 	resBody, err := io.ReadAll(res.Body)
-
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(0)
@@ -367,9 +363,8 @@ func getVersionHistory() {
 
 func getWholeText(input string, configDir string) {
 	checkInputLength(input)
-
+hicGetWholeText:
 	resp, err := newRequest(input)
-
 	if err != nil {
 		stopSpin = true
 		printConnectionErrorMsg(err)
@@ -389,7 +384,10 @@ func getWholeText(input string, configDir string) {
 	fullText := ""
 	// Handling each part
 	for scanner.Scan() {
-		mainText := getMainText(scanner.Text())
+		mainText, e := getMainText(scanner.Text())
+		if e != nil {
+			goto hicGetWholeText
+		}
 		fullText += mainText
 	}
 	fmt.Println(fullText)
@@ -397,9 +395,8 @@ func getWholeText(input string, configDir string) {
 
 func getSilentText(input string, configDir string) {
 	checkInputLength(input)
-
+hicGetSilentText:
 	resp, err := newRequest(input)
-
 	if err != nil {
 		stopSpin = true
 		printConnectionErrorMsg(err)
@@ -419,7 +416,10 @@ func getSilentText(input string, configDir string) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		mainText := getMainText(line)
+		mainText, e := getMainText(line)
+		if e != nil {
+			goto hicGetSilentText
+		}
 		fmt.Print(mainText)
 	}
 }
@@ -441,7 +441,7 @@ func newRequest(input string) (*http.Response, error) {
 	safeInput, _ := json.Marshal(input)
 
 	timeNow := time.Now().UnixMilli()
-	var data = strings.NewReader(fmt.Sprintf(`{"question":%v,"chat_id":"652c1109a2f1ba5abe7601b6","timestamp":%v}
+	data := strings.NewReader(fmt.Sprintf(`{"question":%v,"chat_id":"652c1109a2f1ba5abe7601b6","timestamp":%v}
 	`, string(safeInput), timeNow))
 
 	req, err := http.NewRequest("POST", "https://chatgptlogin.ai//chat/chat_api_stream", data)
@@ -457,22 +457,27 @@ func newRequest(input string) (*http.Response, error) {
 	return (client.Do(req))
 }
 
-func getMainText(line string) (mainText string) {
-	var obj = "{}"
+func getMainText(line string) (mainText string, err error) {
+	obj := "{}"
 	if len(line) > 1 {
-		obj = strings.Split(line, "data: ")[1]
+		a := strings.Split(line, "data: ")
+		if len(a) >= 2 {
+			obj = a[1]
+		} else {
+			return "", errors.New("TGPT: oops, didn't find 'data:'' in " + line)
+		}
 	}
 
 	var d Response
 	if err := json.Unmarshal([]byte(obj), &d); err != nil {
-		return ""
+		return "", nil
 	}
 
 	if d.Choices != nil {
 		mainText = d.Choices[0].Delta.Content
-		return mainText
+		return mainText, nil
 	}
-	return ""
+	return "", nil
 }
 
 func handleEachPart(resp *http.Response) {
@@ -497,7 +502,11 @@ func handleEachPart(resp *http.Response) {
 	}
 
 	for scanner.Scan() {
-		mainText := getMainText(scanner.Text())
+		mainText, e := getMainText(scanner.Text())
+		if e != nil {
+			fmt.Println("Error", e.Error())
+			os.Exit(0)
+		}
 
 		if count <= 0 {
 			wordLength := len([]rune(mainText))
@@ -596,7 +605,6 @@ func handleEachPart(resp *http.Response) {
 					if tickCount > 3 || isRealCode || (tickCount == 0 && previousWasTick) {
 						fmt.Print(word)
 					}
-
 				}
 				if word == "`" {
 					previousWasTick = true
@@ -613,7 +621,6 @@ func handleEachPart(resp *http.Response) {
 		fmt.Println("Some error has occurred. Error:", err)
 		os.Exit(0)
 	}
-
 }
 
 func printConnectionErrorMsg(err error) {
@@ -622,7 +629,7 @@ func printConnectionErrorMsg(err error) {
 	os.Exit(0)
 }
 
-func handleStatus400(resp *http.Response){
+func handleStatus400(resp *http.Response) {
 	bold.Println("\rSome error has occurred. Statuscode:", resp.StatusCode)
 	respBody, _ := io.ReadAll(resp.Body)
 	fmt.Println(string(respBody))
